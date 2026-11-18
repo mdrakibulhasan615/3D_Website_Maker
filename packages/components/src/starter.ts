@@ -9,6 +9,10 @@ import {
   type SiteDocument,
 } from "@msb/schema";
 import { createNode } from "./factory";
+import { FONT_OPTIONS } from "./fonts";
+import { tokenRef } from "./tokens";
+
+const color = (name: string) => tokenRef("colors", name);
 
 type Overrides = { name?: string; props?: Record<string, unknown>; styles?: ResponsiveStyles };
 
@@ -34,7 +38,7 @@ export function createStarterDocument(): SiteDocument {
   const hero = add("Section", root, {
     name: "Hero",
     styles: {
-      base: { paddingTop: 96, paddingBottom: 96, textAlign: "center", backgroundColor: "#0f172a", color: "#f8fafc" },
+      base: { paddingTop: 96, paddingBottom: 96, textAlign: "center", backgroundColor: color("ink"), color: color("paper") },
       md: { paddingTop: 140, paddingBottom: 140 },
     },
   });
@@ -74,12 +78,12 @@ export function createStarterDocument(): SiteDocument {
           paddingLeft: 24,
           paddingRight: 24,
           borderRadius: 16,
-          backgroundColor: "#f1f5f9",
+          backgroundColor: color("surface"),
         },
       },
     });
     add("Text", card, { props: { tag: "h3", text: title }, styles: { base: { fontSize: 20, fontWeight: 700 } } });
-    add("Text", card, { props: { text: body }, styles: { base: { fontSize: 16, color: "#475569" } } });
+    add("Text", card, { props: { text: body }, styles: { base: { fontSize: 16, color: color("muted") } } });
   }
 
   add("Footer", root, { props: { text: "© 2026 Lumen. Built with Motion Site Builder." } });
@@ -88,7 +92,10 @@ export function createStarterDocument(): SiteDocument {
     id: createId("doc"),
     schemaVersion: CURRENT_SCHEMA_VERSION,
     meta: { title: "My first site" },
-    tokens: { colors: { brand: "#4f46e5" }, fonts: {} },
+    tokens: {
+      colors: { brand: "#4f46e5", ink: "#0f172a", paper: "#f8fafc", muted: "#475569", surface: "#f1f5f9" },
+      fonts: { heading: FONT_OPTIONS[0]!.value, body: FONT_OPTIONS[0]!.value },
+    },
     breakpoints: structuredClone(DEFAULT_BREAKPOINTS),
     pages: [{ id: createId("page"), name: "Home", slug: "/", rootNodeId: root }],
     nodes,

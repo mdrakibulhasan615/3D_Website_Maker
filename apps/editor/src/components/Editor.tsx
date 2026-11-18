@@ -6,7 +6,7 @@ import { handleEditorKeyDown } from "@/store/shortcuts";
 import { TopBar } from "./TopBar";
 import { InsertPanel } from "./InsertPanel";
 import { LayersPanel } from "./LayersPanel";
-import { Inspector } from "./Inspector";
+import { Inspector } from "./inspector/Inspector";
 import { Canvas } from "./canvas/Canvas";
 import { DragGhost } from "./DragGhost";
 

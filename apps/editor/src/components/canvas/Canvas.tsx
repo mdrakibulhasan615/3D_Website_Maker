@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { isAncestorOf } from "@msb/schema";
-import { BASE_CSS, EDITOR_CSS, getDefinition, renderDocument } from "@msb/components";
+import { BASE_CSS, EDITOR_CSS, getDefinition, googleFontsHref, renderDocument } from "@msb/components";
 import { useEditor } from "@/store/editorStore";
 import { handleEditorKeyDown } from "@/store/shortcuts";
 import { frameToParent, registerFrame } from "@/interactions/frameBridge";
@@ -70,6 +70,8 @@ export function Canvas() {
 
   // Re-render the site only when the document changes. useMemo caches the result.
   const { tree, css } = useMemo(() => renderDocument(doc, pageId, "editor"), [doc, pageId]);
+  // Only non-null when the document uses a Google font — no external request otherwise.
+  const fontsHref = useMemo(() => googleFontsHref(doc), [doc]);
 
   // 1) Wait for the iframe's empty page to load, then grab its `document`.
   useEffect(() => {
@@ -129,6 +131,7 @@ export function Canvas() {
         <iframe ref={iframeRef} srcDoc={FRAME_HTML} title="Canvas" className="block h-full w-full border-0" />
         {/* 3) Portals: render the site's CSS into the iframe <head> and the site into its <body>. */}
         {frameDoc && createPortal(<style>{BASE_CSS + EDITOR_CSS + css}</style>, frameDoc.head)}
+        {frameDoc && fontsHref && createPortal(<link rel="stylesheet" href={fontsHref} />, frameDoc.head)}
         {frameDoc && createPortal(tree, frameDoc.body)}
         {frameDoc && <SelectionOverlay frameDoc={frameDoc} />}
       </div>

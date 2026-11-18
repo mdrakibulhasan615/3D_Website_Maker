@@ -408,9 +408,10 @@ File tree → zip / GitHub repo / Vercel deploy hook
 ### Phase 2 — Component System & Styling Inspector
 **Goal:** a professional-feeling editor with a real component library.
 
-- [ ] `defineComponent` registry contract + auto-generated Inspector
-- [ ] Inspector panels: Layout (flex/grid/free), Spacing, Typography, Colors, Borders, Effects (shadow, blur, gradients)
-- [ ] Design tokens panel → CSS variables; token references in style values
+- [x] `defineComponent` registry contract + auto-generated Inspector (incl. `toggle` + `visibleWhen`)
+- [x] Inspector panels: Layout (block/flex/grid + grid-item spans), Spacing (box model), Size, Typography, Fill (solid/gradient), Border, Effects (opacity, shadow presets, blur, backdrop blur) — every field shows set-here vs inherited and supports label scrubbing
+- [x] Design tokens panel → CSS variables; token references in style values; rename rewrites references, delete inlines the value; Google fonts load only when used
+- Decision: per-breakpoint **styles stay mobile-first** (no pinning) — matches the Tailwind code we will export; positions pin because they are coordinates, not cascading intent.
 - [ ] Layer Tree (virtualized, rename, lock, hide, drag to reparent)
 - [ ] Section library: Hero, Feature Grid, Bento Grid (grid snap), Pricing, Testimonials
 - [ ] Copy/paste, duplicate, group, keyboard shortcuts

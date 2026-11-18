@@ -4,7 +4,8 @@ import type { DesignTokens } from "@msb/schema";
 export const BASE_CSS = `
 *,*::before,*::after{box-sizing:border-box}
 html,body{margin:0}
-body{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#0f172a;-webkit-font-smoothing:antialiased}
+body{font-family:var(--font-body,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);color:var(--color-ink,#0f172a);-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--font-heading,inherit)}
 h1,h2,h3,h4,p{margin:0}
 img{max-width:100%}
 a{color:inherit}

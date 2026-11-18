@@ -19,7 +19,16 @@ import {
   type SiteDocument,
   type StyleValue,
 } from "@msb/schema";
-import { isFreeLayout, nextFreeRect, stacksOnMobile, type LayoutMode } from "@msb/components";
+import {
+  isFreeLayout,
+  isValidTokenName,
+  nextFreeRect,
+  replaceTokenRefs,
+  stacksOnMobile,
+  tokenRef,
+  type LayoutMode,
+  type TokenKind,
+} from "@msb/components";
 import { createNode, getDefinition } from "@msb/components";
 import { loadInitialDocument, saveDocument } from "./persistence";
 
@@ -80,6 +89,13 @@ export type EditorState = {
   setProportional: (id: string, on: boolean, measuredWidth?: number) => void;
   updateProps: (id: string, patch: Record<string, unknown>) => void;
   setStyle: (id: string, prop: string, value: StyleValue | undefined) => void;
+  /** Several style props at once (one undo step), e.g. switching fill mode. */
+  setStyles: (id: string, patch: Record<string, StyleValue | undefined>) => void;
+  setToken: (kind: TokenKind, name: string, value: string) => void;
+  /** Renames the token AND rewrites every reference to it. Returns false if the name is invalid/taken. */
+  renameToken: (kind: TokenKind, from: string, to: string) => boolean;
+  /** Deletes the token and replaces its references with the literal value (nothing breaks visually). */
+  deleteToken: (kind: TokenKind, name: string) => void;
   renameNode: (id: string, name: string) => void;
   toggleHidden: (id: string) => void;
   setTitle: (title: string) => void;
@@ -107,6 +123,21 @@ function resolveInsertTarget(doc: SiteDocument, pageId: string, selectedId: stri
     }
   }
   return { parentId: rootId, index: doc.nodes[rootId]!.children.length };
+}
+
+/** Run `fn` over every string style value in the document (used to rewrite token references). */
+function rewriteStyleStrings(draft: Draft<SiteDocument>, fn: (value: string) => string) {
+  for (const node of Object.values(draft.nodes)) {
+    for (const bp of BREAKPOINT_ORDER) {
+      const styles = node.styles[bp];
+      if (!styles) continue;
+      for (const [prop, value] of Object.entries(styles)) {
+        if (typeof value !== "string") continue;
+        const next = fn(value);
+        if (next !== value) styles[prop] = next;
+      }
+    }
+  }
 }
 
 export const useEditor = create<EditorState>()((set, get) => {
@@ -296,6 +327,46 @@ export const useEditor = create<EditorState>()((set, get) => {
         if (Object.keys(styles).length === 0) delete node.styles[bp];
       }, `style:${id}:${bp}:${prop}`);
     },
+
+    setStyles: (id, patch) => {
+      const bp = get().breakpoint;
+      commit((draft) => {
+        const node = draft.nodes[id];
+        if (!node) return;
+        const styles = (node.styles[bp] ??= {});
+        for (const [prop, value] of Object.entries(patch)) {
+          if (value === undefined || value === "") delete styles[prop];
+          else styles[prop] = value;
+        }
+        if (Object.keys(styles).length === 0) delete node.styles[bp];
+      }, `styles:${id}:${bp}:${Object.keys(patch).sort().join(",")}`);
+    },
+
+    setToken: (kind, name, value) =>
+      commit((draft) => {
+        draft.tokens[kind][name] = value;
+      }, `token:${kind}:${name}`),
+
+    renameToken: (kind, from, to) => {
+      const tokens = get().doc.tokens[kind];
+      if (from === to || !(from in tokens) || to in tokens || !isValidTokenName(to)) return false;
+      commit((draft) => {
+        // Rebuild the object so the renamed token keeps its position in the list.
+        draft.tokens[kind] = Object.fromEntries(
+          Object.entries(draft.tokens[kind]).map(([k, v]) => (k === from ? [to, v] : [k, v])),
+        );
+        rewriteStyleStrings(draft, (v) => replaceTokenRefs(v, kind, from, (fallback) => tokenRef(kind, to, fallback)));
+      });
+      return true;
+    },
+
+    deleteToken: (kind, name) =>
+      commit((draft) => {
+        const value = draft.tokens[kind][name];
+        if (value === undefined) return;
+        delete draft.tokens[kind][name];
+        rewriteStyleStrings(draft, (v) => replaceTokenRefs(v, kind, name, value));
+      }),
 
     renameNode: (id, name) =>
       commit((draft) => {

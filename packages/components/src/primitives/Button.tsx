@@ -19,7 +19,8 @@ export const Button = defineComponent({
       paddingLeft: 24,
       paddingRight: 24,
       borderRadius: 999,
-      backgroundColor: "#4f46e5",
+      // A token reference (with a fallback in case the document has no "brand" token).
+      backgroundColor: "var(--color-brand, #4f46e5)",
       color: "#ffffff",
       fontWeight: 600,
       textDecoration: "none",
