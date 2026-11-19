@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { isAncestorOf } from "@msb/schema";
+import { isAncestorOf, isLockedInTree } from "@msb/schema";
 import { BASE_CSS, EDITOR_CSS, getDefinition, googleFontsHref, renderDocument } from "@msb/components";
 import { useEditor } from "@/store/editorStore";
-import { handleEditorKeyDown } from "@/store/shortcuts";
+import { handleEditorKeyDown } from "@/commands/keyboard";
+import { handleCopyEvent, handleCutEvent, handlePasteEvent } from "@/commands/clipboard";
+import { openMenu } from "@/commands/uiStore";
 import { frameToParent, registerFrame } from "@/interactions/frameBridge";
 import { consumeRecentDrag } from "@/interactions/pointerSession";
 import { startDrag } from "@/interactions/dragDrop";
@@ -24,7 +26,12 @@ const FRAME_HTML =
 function findNodeId(target: EventTarget | null): string | null {
   const el = target as Element | null;
   if (!el || typeof el.closest !== "function") return null;
-  return el.closest("[data-node-id]")?.getAttribute("data-node-id") ?? null;
+  const id = el.closest("[data-node-id]")?.getAttribute("data-node-id") ?? null;
+  // Locked layers are "click-through": climb to the first ancestor outside any locked subtree.
+  const { doc } = useEditor.getState();
+  let current = id;
+  while (current && isLockedInTree(doc, current)) current = doc.nodes[current]?.parentId ?? null;
+  return current;
 }
 
 /**
@@ -104,19 +111,29 @@ export function Canvas() {
       select(findNodeId(e.target));
     };
     const onNativeDrag = (e: DragEvent) => e.preventDefault();
-    frameDoc.addEventListener("mousemove", onMove);
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      select(findNodeId(e.target));
+      const p = frameToParent({ x: e.clientX, y: e.clientY }); // the menu lives in the main page
+      openMenu(p.x, p.y);
+    };
+    // The same handlers as the main page — keyboard focus may be inside the iframe.
+    const listeners: [string, EventListener][] = [
+      ["mousemove", onMove as EventListener],
+      ["click", onClick as EventListener],
+      ["pointerdown", onCanvasPointerDown as EventListener],
+      ["dragstart", onNativeDrag as EventListener],
+      ["contextmenu", onContextMenu as EventListener],
+      ["keydown", handleEditorKeyDown as EventListener],
+      ["copy", handleCopyEvent as EventListener],
+      ["cut", handleCutEvent as EventListener],
+      ["paste", handlePasteEvent as EventListener],
+    ];
+    for (const [type, fn] of listeners) frameDoc.addEventListener(type, fn);
     frameDoc.documentElement.addEventListener("mouseleave", onLeave);
-    frameDoc.addEventListener("click", onClick);
-    frameDoc.addEventListener("pointerdown", onCanvasPointerDown);
-    frameDoc.addEventListener("dragstart", onNativeDrag);
-    frameDoc.addEventListener("keydown", handleEditorKeyDown);
     return () => {
-      frameDoc.removeEventListener("mousemove", onMove);
+      for (const [type, fn] of listeners) frameDoc.removeEventListener(type, fn);
       frameDoc.documentElement.removeEventListener("mouseleave", onLeave);
-      frameDoc.removeEventListener("click", onClick);
-      frameDoc.removeEventListener("pointerdown", onCanvasPointerDown);
-      frameDoc.removeEventListener("dragstart", onNativeDrag);
-      frameDoc.removeEventListener("keydown", handleEditorKeyDown);
     };
   }, [frameDoc]);
 

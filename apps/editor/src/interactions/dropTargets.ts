@@ -4,7 +4,7 @@
  * Answers with { parentId, index } (a position in the tree) plus an indicator to draw.
  * Works over two surfaces: rows in the Layers panel, and elements inside the canvas iframe.
  */
-import { getPage, isAncestorOf, type Node, type SiteDocument } from "@msb/schema";
+import { getPage, isAncestorOf, isLockedInTree, type Node, type SiteDocument } from "@msb/schema";
 import { getDefinition, isFreeLayout, isPositionedAt } from "@msb/components";
 import { useEditor } from "@/store/editorStore";
 import { getFlowDirection, getFrameDoc, getNodeRect, parentToFrame, type Box, type Point } from "./frameBridge";
@@ -40,8 +40,9 @@ function isInsideSource(doc: SiteDocument, id: string, source: DragSource): bool
 function canvasTarget(doc: SiteDocument, rootId: string, p: Point, source: DragSource): DropTarget | null {
   const hit = getFrameDoc()?.elementFromPoint(p.x, p.y)?.closest("[data-node-id]");
   let id = hit?.getAttribute("data-node-id") ?? rootId;
-  // Pointer is over the dragged element → climb up until we're outside it.
-  while (id !== rootId && isInsideSource(doc, id, source)) id = doc.nodes[id]!.parentId!;
+  // Pointer is over the dragged element, or over something locked → climb up until we're
+  // outside both (you can't drop inside, or next to things inside, a locked subtree).
+  while (id !== rootId && (isInsideSource(doc, id, source) || isLockedInTree(doc, id))) id = doc.nodes[id]!.parentId!;
 
   const node = doc.nodes[id];
   const rect = getNodeRect(id);
@@ -147,10 +148,11 @@ function layerTarget(doc: SiteDocument, row: HTMLElement, p: Point, source: Drag
   const accepts = !!getDefinition(node.type)?.acceptsChildren;
 
   if (!node.parentId || (accepts && rel > 0.25 && rel < 0.75)) {
-    if (!accepts) return null;
+    if (!accepts || isLockedInTree(doc, id)) return null;
     return { parentId: id, index: node.children.length, indicator: null, layerHint: { id, position: "inside" } };
   }
   const parent = doc.nodes[node.parentId]!;
+  if (isLockedInTree(doc, parent.id)) return null;
   const position = rel < 0.5 ? "before" : "after";
   return {
     parentId: parent.id,

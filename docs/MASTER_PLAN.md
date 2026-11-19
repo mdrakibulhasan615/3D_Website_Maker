@@ -412,9 +412,12 @@ File tree → zip / GitHub repo / Vercel deploy hook
 - [x] Inspector panels: Layout (block/flex/grid + grid-item spans), Spacing (box model), Size, Typography, Fill (solid/gradient), Border, Effects (opacity, shadow presets, blur, backdrop blur) — every field shows set-here vs inherited and supports label scrubbing
 - [x] Design tokens panel → CSS variables; token references in style values; rename rewrites references, delete inlines the value; Google fonts load only when used
 - Decision: per-breakpoint **styles stay mobile-first** (no pinning) — matches the Tailwind code we will export; positions pin because they are coordinates, not cascading intent.
-- [ ] Layer Tree (virtualized, rename, lock, hide, drag to reparent)
+- [x] Layer Tree: collapse/expand (auto-reveals selection), double-click rename, lock, hide, drag to reparent, right-click menu
+- [ ] Layer Tree virtualization (only needed for very large pages)
 - [ ] Section library: Hero, Feature Grid, Bento Grid (grid snap), Pricing, Testimonials
-- [ ] Copy/paste, duplicate, group, keyboard shortcuts
+- [x] Command registry (`apps/editor/src/commands/`) drives keyboard, context menu and the `?` shortcuts dialog
+- [x] Copy/cut/paste via native clipboard events (works across tabs; pasted data validated with Zod + structure checks; plain text → Text element), duplicate, wrap in container / unwrap, lock (click-through, no move/delete/drop), move up/down, arrow-key nudge, Escape → parent
+- [ ] Multi-select (Shift-click) + true "Group selection" — deferred: touches selection, overlay, inspector and drag
 - [ ] Rich text editing (Tiptap) inside Text nodes
 
 **Exit criteria:** a non-developer can build a polished marketing page from templates in under 15 minutes.

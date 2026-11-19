@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties } from "react";
+import { isLockedInTree } from "@msb/schema";
 import { getDefinition, isPositionedAt } from "@msb/components";
 import { useEditor } from "@/store/editorStore";
 import { useDragStore } from "@/interactions/dragStore";
@@ -40,7 +41,11 @@ export function SelectionOverlay({ frameDoc }: { frameDoc: Document }) {
   });
   const showHandles = useEditor((s) => {
     const node = s.selectedId ? s.doc.nodes[s.selectedId] : undefined;
-    return !!node?.layout && isPositionedAt(node.parentId ? s.doc.nodes[node.parentId] : undefined, s.breakpoint);
+    return (
+      !!node?.layout &&
+      !isLockedInTree(s.doc, node.id) &&
+      isPositionedAt(node.parentId ? s.doc.nodes[node.parentId] : undefined, s.breakpoint)
+    );
   });
   const dragging = useDragStore((s) => s.source !== null);
   const indicator = useDragStore((s) => s.target?.indicator ?? null);

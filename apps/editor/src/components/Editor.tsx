@@ -2,23 +2,32 @@
 
 import { useEffect } from "react";
 import { startAutosave } from "@/store/editorStore";
-import { handleEditorKeyDown } from "@/store/shortcuts";
+import { handleEditorKeyDown } from "@/commands/keyboard";
+import { handleCopyEvent, handleCutEvent, handlePasteEvent } from "@/commands/clipboard";
 import { TopBar } from "./TopBar";
 import { InsertPanel } from "./InsertPanel";
 import { LayersPanel } from "./LayersPanel";
 import { Inspector } from "./inspector/Inspector";
 import { Canvas } from "./canvas/Canvas";
 import { DragGhost } from "./DragGhost";
+import { ContextMenu } from "./ContextMenu";
+import { ShortcutsDialog } from "./ShortcutsDialog";
 
-/** The editor shell: top bar, left panels, canvas, inspector. */
+/** The editor shell: top bar, left panels, canvas, inspector — plus global listeners and overlays. */
 export default function Editor() {
   useEffect(() => {
     const stopAutosave = startAutosave();
     window.addEventListener("keydown", handleEditorKeyDown);
+    document.addEventListener("copy", handleCopyEvent);
+    document.addEventListener("cut", handleCutEvent);
+    document.addEventListener("paste", handlePasteEvent);
     // Cleanup runs when the component unmounts — always undo what an effect sets up.
     return () => {
       stopAutosave();
       window.removeEventListener("keydown", handleEditorKeyDown);
+      document.removeEventListener("copy", handleCopyEvent);
+      document.removeEventListener("cut", handleCutEvent);
+      document.removeEventListener("paste", handlePasteEvent);
     };
   }, []);
 
@@ -38,6 +47,8 @@ export default function Editor() {
         </aside>
       </div>
       <DragGhost />
+      <ContextMenu />
+      <ShortcutsDialog />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 /** Freeform editing: move/resize elements inside a free section, with snapping. */
-import { createId, resolveRect, type Rect } from "@msb/schema";
+import { createId, isLockedInTree, resolveRect, type Rect } from "@msb/schema";
 import { designWidthOf, isPositionedAt, type LayoutMode } from "@msb/components";
 import { GESTURE_PREFIX, useEditor } from "@/store/editorStore";
 import { useDragStore } from "./dragStore";
@@ -24,14 +24,19 @@ export function horizontalScale(sectionId: string): number {
 }
 
 /**
- * Is this node absolutely positioned at the CURRENT breakpoint?
- * (A child of a stacking free section is NOT positioned in Mobile view.)
+ * Can this node be moved/resized freely right now? It must be absolutely positioned at
+ * the CURRENT breakpoint (a stacking free section's children aren't, in Mobile view)
+ * and not locked.
  */
 export function isFreeChild(id: string | null): boolean {
   if (!id) return false;
   const { doc, breakpoint } = useEditor.getState();
   const node = doc.nodes[id];
-  return !!node?.layout && isPositionedAt(node.parentId ? doc.nodes[node.parentId] : undefined, breakpoint);
+  return (
+    !!node?.layout &&
+    !isLockedInTree(doc, id) &&
+    isPositionedAt(node.parentId ? doc.nodes[node.parentId] : undefined, breakpoint)
+  );
 }
 
 /** Start moving (handle = "move") or resizing (handle = an edge/corner) a free child. */
@@ -39,7 +44,7 @@ export function startTransform(id: string, handle: Handle, start: Point) {
   const { doc, breakpoint } = useEditor.getState();
   const node = doc.nodes[id];
   const parent = node?.parentId ? doc.nodes[node.parentId] : undefined;
-  if (!node?.layout || !parent || !isPositionedAt(parent, breakpoint)) return;
+  if (!node?.layout || !parent || !isPositionedAt(parent, breakpoint) || isLockedInTree(doc, id)) return;
   const section = getNodeRect(parent.id);
   if (!section) return;
 

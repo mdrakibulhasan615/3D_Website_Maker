@@ -13,13 +13,16 @@ import {
   getDescendantIds,
   getPage,
   isAncestorOf,
+  isLockedInTree,
   type BreakpointId,
+  type Fragment,
   type FreeLayout,
   type Rect,
   type SiteDocument,
   type StyleValue,
 } from "@msb/schema";
 import {
+  defaultFreeSize,
   isFreeLayout,
   isValidTokenName,
   nextFreeRect,
@@ -31,6 +34,7 @@ import {
 } from "@msb/components";
 import { createNode, getDefinition } from "@msb/components";
 import { loadInitialDocument, saveDocument } from "./persistence";
+import { extractFragment, instantiateFragment } from "./fragments";
 
 enablePatches();
 
@@ -75,6 +79,16 @@ export type EditorState = {
   /** Insert at an exact spot (drag-and-drop). `layout` is set when dropping into a free section. */
   insertNodeAt: (type: string, parentId: string, index: number, layout?: FreeLayout) => string | null;
   deleteNode: (id: string) => void;
+  /** Insert a copied subtree (fresh ids). Returns the new root id. */
+  insertFragment: (fragment: Fragment, parentId: string, index: number) => string | null;
+  duplicateNode: (id: string) => void;
+  /** Put the node inside a new Container (in its place). */
+  wrapInContainer: (id: string) => void;
+  /** Replace a container with its children. */
+  unwrapNode: (id: string) => void;
+  toggleLocked: (id: string) => void;
+  /** Move one step up (-1) or down (+1) among its siblings. */
+  moveSibling: (id: string, delta: -1 | 1) => void;
   /** layout: undefined = keep as is, null = remove (leaving a free section), object = set. */
   moveNode: (id: string, newParentId: string, index: number, layout?: FreeLayout | null) => void;
   /** Write a freeform rectangle at the CURRENT breakpoint. */
@@ -193,6 +207,7 @@ export const useEditor = create<EditorState>()((set, get) => {
     insertNodeAt: (type, parentId, index, layout) => {
       const parent = get().doc.nodes[parentId];
       if (!getDefinition(type) || !parent || !getDefinition(parent.type)?.acceptsChildren) return null;
+      if (isLockedInTree(get().doc, parentId)) return null;
       const node = createNode(type, parentId);
       if (layout) node.layout = layout;
       // Anything inside a free section needs a position, even when inserted by click.
@@ -209,6 +224,7 @@ export const useEditor = create<EditorState>()((set, get) => {
       const { doc, pageId } = get();
       const node = doc.nodes[id];
       if (!node?.parentId || id === getPage(doc, pageId).rootNodeId) return; // can't delete the page root
+      if (isLockedInTree(doc, id)) return;
       const parentId = node.parentId;
       const toDelete = [id, ...getDescendantIds(doc, id)];
       commit((draft) => {
@@ -225,6 +241,7 @@ export const useEditor = create<EditorState>()((set, get) => {
       const newParent = doc.nodes[newParentId];
       if (!node?.parentId || !newParent) return;
       if (id === newParentId || isAncestorOf(doc, id, newParentId)) return; // can't drop into itself
+      if (isLockedInTree(doc, id) || isLockedInTree(doc, newParentId)) return;
       if (!getDefinition(newParent.type)?.acceptsChildren) return;
       const oldParentId = node.parentId;
       commit((draft) => {
@@ -243,6 +260,117 @@ export const useEditor = create<EditorState>()((set, get) => {
         }
       });
       set({ selectedId: id });
+    },
+
+    insertFragment: (fragment, parentId, index) => {
+      const { doc } = get();
+      const parent = doc.nodes[parentId];
+      if (!parent || !getDefinition(parent.type)?.acceptsChildren || isLockedInTree(doc, parentId)) return null;
+
+      const { rootId, nodes } = instantiateFragment(fragment);
+      const root = nodes[rootId]!;
+      root.parentId = parentId;
+      if (!isFreeLayout(parent)) {
+        delete root.layout; // flow parent: positions don't apply
+      } else if (root.layout) {
+        // Offset copies so they don't sit exactly on top of the original.
+        for (const bp of BREAKPOINT_ORDER) {
+          const r = root.layout[bp];
+          if (r) root.layout[bp] = { ...r, x: r.x + 16, y: r.y + 16 };
+        }
+      } else {
+        root.layout = { base: nextFreeRect(doc.nodes, parent, root.type) };
+      }
+
+      commit((draft) => {
+        Object.assign(draft.nodes, nodes);
+        draft.nodes[parentId]!.children.splice(index, 0, rootId);
+      });
+      set({ selectedId: rootId });
+      return rootId;
+    },
+
+    duplicateNode: (id) => {
+      const { doc } = get();
+      const node = doc.nodes[id];
+      if (!node?.parentId) return;
+      const parent = doc.nodes[node.parentId]!;
+      get().insertFragment(extractFragment(doc, id), parent.id, parent.children.indexOf(id) + 1);
+    },
+
+    wrapInContainer: (id) => {
+      const { doc } = get();
+      const node = doc.nodes[id];
+      if (!node?.parentId || isLockedInTree(doc, id)) return;
+      const parentId = node.parentId;
+      const wrapper = createNode("Container", parentId);
+      wrapper.name = "Group";
+      wrapper.children = [id];
+      // In a free section the WRAPPER takes over the position; the node flows inside it.
+      if (node.layout && isFreeLayout(doc.nodes[parentId])) wrapper.layout = structuredClone(node.layout);
+
+      commit((draft) => {
+        draft.nodes[wrapper.id] = wrapper;
+        const parent = draft.nodes[parentId]!;
+        parent.children[parent.children.indexOf(id)] = wrapper.id;
+        const moved = draft.nodes[id]!;
+        moved.parentId = wrapper.id;
+        delete moved.layout;
+      });
+      set({ selectedId: wrapper.id });
+    },
+
+    unwrapNode: (id) => {
+      const { doc } = get();
+      const node = doc.nodes[id];
+      if (!node?.parentId || !getDefinition(node.type)?.acceptsChildren || isLockedInTree(doc, id)) return;
+      const parentId = node.parentId;
+      const parent = doc.nodes[parentId]!;
+      const intoFree = isFreeLayout(parent);
+      // Where the children go in a free parent: stacked from the container's old position.
+      const origin = node.layout ? resolveRect(node.layout, "lg") : nextFreeRect(doc.nodes, parent, node.type);
+
+      commit((draft) => {
+        const p = draft.nodes[parentId]!;
+        p.children.splice(p.children.indexOf(id), 1, ...node.children);
+        let y = origin.y;
+        for (const childId of node.children) {
+          const child = draft.nodes[childId]!;
+          child.parentId = parentId;
+          if (!intoFree) {
+            delete child.layout;
+          } else {
+            const size = defaultFreeSize(child.type);
+            child.layout = { base: { x: origin.x, y, w: Math.min(size.w, origin.w), h: size.h } };
+            y += size.h + 16;
+          }
+        }
+        delete draft.nodes[id];
+      });
+      set({ selectedId: node.children[0] ?? parentId });
+    },
+
+    toggleLocked: (id) =>
+      commit((draft) => {
+        const node = draft.nodes[id];
+        if (!node?.parentId) return; // the page root can't be locked
+        if (node.locked) delete node.locked;
+        else node.locked = true;
+      }),
+
+    moveSibling: (id, delta) => {
+      const { doc } = get();
+      const node = doc.nodes[id];
+      if (!node?.parentId || isLockedInTree(doc, id)) return;
+      const siblings = doc.nodes[node.parentId]!.children;
+      const from = siblings.indexOf(id);
+      const to = from + delta;
+      if (to < 0 || to >= siblings.length) return;
+      commit((draft) => {
+        const children = draft.nodes[node.parentId!]!.children;
+        children.splice(from, 1);
+        children.splice(to, 0, id);
+      }, `sibling:${id}`);
     },
 
     setFreeRect: (id, rect, mergeKey) => {

@@ -1,7 +1,7 @@
 "use client";
 
 /** Everything about the SELECTED element: name, content props, position, and styles. */
-import { resolveRect, type Rect } from "@msb/schema";
+import { isLockedInTree, resolveRect, type Rect } from "@msb/schema";
 import { designWidthOf, getDefinition, isFreeLayout, isPositionedAt } from "@msb/components";
 import { useEditor } from "@/store/editorStore";
 import { Group, INPUT } from "./ui";
@@ -22,6 +22,7 @@ export function ElementPanel() {
     return n?.parentId ? s.doc.nodes[n.parentId] : undefined;
   });
   const breakpoint = useEditor((s) => s.breakpoint);
+  const locked = useEditor((s) => (s.selectedId ? isLockedInTree(s.doc, s.selectedId) : false));
   if (!node) return null;
 
   const def = getDefinition(node.type);
@@ -45,6 +46,13 @@ export function ElementPanel() {
           className="mt-1 w-full rounded border border-transparent px-1 py-0.5 text-sm font-medium hover:border-neutral-200 focus:border-indigo-400 focus:outline-none"
         />
       </div>
+
+      {locked && (
+        <div className="mx-3 mt-3 rounded bg-neutral-100 px-2 py-1.5 text-[11px] leading-snug text-neutral-600">
+          <b>Locked</b>{node.locked ? "" : " (by a parent)"} — it can&apos;t be moved, resized or deleted, and clicks on
+          the canvas pass through it. Content and styles are still editable here.
+        </div>
+      )}
 
       {controls.length > 0 && (
         <Group title="Content">
@@ -97,7 +105,8 @@ export function ElementPanel() {
         <div className="px-3 pt-4">
           <button
             onClick={() => deleteNode(node.id)}
-            className="w-full rounded border border-red-200 py-1.5 text-xs text-red-600 hover:bg-red-50"
+            disabled={locked}
+            className="w-full rounded border border-red-200 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
           >
             Delete element
           </button>
