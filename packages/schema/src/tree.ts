@@ -23,6 +23,18 @@ export function isAncestorOf(doc: SiteDocument, ancestorId: string, id: string):
   return false;
 }
 
+/** Is this node locked — itself, or because any ancestor is locked? */
+export function isLockedInTree(doc: SiteDocument, id: string): boolean {
+  let current: string | null | undefined = id;
+  while (current) {
+    const node: SiteDocument["nodes"][string] | undefined = doc.nodes[current];
+    if (!node) return false;
+    if (node.locked) return true;
+    current = node.parentId;
+  }
+  return false;
+}
+
 export function getPage(doc: SiteDocument, pageId: string): Page {
   return doc.pages.find((p) => p.id === pageId) ?? doc.pages[0]!;
 }

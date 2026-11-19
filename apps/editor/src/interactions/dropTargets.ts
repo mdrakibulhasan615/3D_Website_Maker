@@ -4,7 +4,7 @@
  * Answers with { parentId, index } (a position in the tree) plus an indicator to draw.
  * Works over two surfaces: rows in the Layers panel, and elements inside the canvas iframe.
  */
-import { getPage, isAncestorOf, type Node, type SiteDocument } from "@msb/schema";
+import { getPage, isAncestorOf, isLockedInTree, type Node, type SiteDocument } from "@msb/schema";
 import { getDefinition, isFreeLayout, isPositionedAt } from "@msb/components";
 import { useEditor } from "@/store/editorStore";
 import { getFlowDirection, getFrameDoc, getNodeRect, parentToFrame, type Box, type Point } from "./frameBridge";
@@ -14,7 +14,9 @@ import type { DragSource, DropTarget } from "./dragStore";
 const EDGE_ZONE = 8;
 const LINE = 2;
 
+/** The axis siblings are compared along. Grids flow in reading order, i.e. row-wise. */
 type Direction = "row" | "column";
+const axisOf = (flow: "row" | "column" | "grid"): Direction => (flow === "column" ? "column" : "row");
 
 export function computeDropTarget(point: Point, source: DragSource): DropTarget | null {
   const { doc, pageId } = useEditor.getState();
@@ -40,8 +42,9 @@ function isInsideSource(doc: SiteDocument, id: string, source: DragSource): bool
 function canvasTarget(doc: SiteDocument, rootId: string, p: Point, source: DragSource): DropTarget | null {
   const hit = getFrameDoc()?.elementFromPoint(p.x, p.y)?.closest("[data-node-id]");
   let id = hit?.getAttribute("data-node-id") ?? rootId;
-  // Pointer is over the dragged element → climb up until we're outside it.
-  while (id !== rootId && isInsideSource(doc, id, source)) id = doc.nodes[id]!.parentId!;
+  // Pointer is over the dragged element, or over something locked → climb up until we're
+  // outside both (you can't drop inside, or next to things inside, a locked subtree).
+  while (id !== rootId && (isInsideSource(doc, id, source) || isLockedInTree(doc, id))) id = doc.nodes[id]!.parentId!;
 
   const node = doc.nodes[id];
   const rect = getNodeRect(id);
@@ -51,7 +54,7 @@ function canvasTarget(doc: SiteDocument, rootId: string, p: Point, source: DragS
   if (getDefinition(node.type)?.acceptsChildren) {
     if (isFreeLayout(node)) return freeTarget(node, rect, p);
     if (parent && !isFreeLayout(parent)) {
-      const dir = getFlowDirection(parent.id);
+      const dir = axisOf(getFlowDirection(parent.id));
       const edge = nearEdge(rect, p, dir);
       if (edge) return siblingTarget(doc, node, edge, rect, dir);
     }
@@ -64,7 +67,7 @@ function canvasTarget(doc: SiteDocument, rootId: string, p: Point, source: DragS
     const parentRect = getNodeRect(parent.id);
     return parentRect ? freeTarget(parent, parentRect, p) : null;
   }
-  const dir = getFlowDirection(parent.id);
+  const dir = axisOf(getFlowDirection(parent.id));
   const before = dir === "row" ? p.x < rect.left + rect.width / 2 : p.y < rect.top + rect.height / 2;
   return siblingTarget(doc, node, before ? "before" : "after", rect, dir);
 }
@@ -94,7 +97,7 @@ function siblingTarget(doc: SiteDocument, node: Node, position: "before" | "afte
 
 /** Inside a flow container: find the gap between children closest to the pointer. */
 function childTarget(container: Node, rect: Box, p: Point): DropTarget {
-  const dir = getFlowDirection(container.id);
+  const flow = getFlowDirection(container.id);
   const kids = container.children
     .map((id) => ({ id, r: getNodeRect(id) }))
     .filter((k): k is { id: string; r: Box } => k.r !== null);
@@ -103,6 +106,28 @@ function childTarget(container: Node, rect: Box, p: Point): DropTarget {
     return { parentId: container.id, index: container.children.length, indicator: { kind: "box", rect } };
   }
 
+  // GRID: 2D, so compare in reading order. The pointer goes before the first cell that is
+  // in a LATER row, or in the SAME row but to the right of the pointer.
+  if (flow === "grid") {
+    for (const kid of kids) {
+      const inRow = p.y >= kid.r.top && p.y <= kid.r.top + kid.r.height;
+      if (p.y < kid.r.top || (inRow && p.x < kid.r.left + kid.r.width / 2)) {
+        return {
+          parentId: container.id,
+          index: container.children.indexOf(kid.id),
+          indicator: { kind: "line", rect: lineAt(kid.r.left, kid.r, "row") }, // vertical line before the cell
+        };
+      }
+    }
+    const last = kids[kids.length - 1]!.r;
+    return {
+      parentId: container.id,
+      index: container.children.length,
+      indicator: { kind: "line", rect: lineAt(last.left + last.width, last, "row") },
+    };
+  }
+
+  const dir = axisOf(flow);
   const pos = dir === "row" ? p.x : p.y;
   for (const kid of kids) {
     const mid = dir === "row" ? kid.r.left + kid.r.width / 2 : kid.r.top + kid.r.height / 2;
@@ -147,10 +172,11 @@ function layerTarget(doc: SiteDocument, row: HTMLElement, p: Point, source: Drag
   const accepts = !!getDefinition(node.type)?.acceptsChildren;
 
   if (!node.parentId || (accepts && rel > 0.25 && rel < 0.75)) {
-    if (!accepts) return null;
+    if (!accepts || isLockedInTree(doc, id)) return null;
     return { parentId: id, index: node.children.length, indicator: null, layerHint: { id, position: "inside" } };
   }
   const parent = doc.nodes[node.parentId]!;
+  if (isLockedInTree(doc, parent.id)) return null;
   const position = rel < 0.5 ? "before" : "after";
   return {
     parentId: parent.id,

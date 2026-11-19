@@ -1,16 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { createPortal } from "react-dom";
-import { isAncestorOf } from "@msb/schema";
-import { BASE_CSS, EDITOR_CSS, getDefinition, renderDocument } from "@msb/components";
+import { isAncestorOf, isLockedInTree } from "@msb/schema";
+import { BASE_CSS, EDITOR_CSS, getDefinition, googleFontsHref, renderDocument } from "@msb/components";
 import { useEditor } from "@/store/editorStore";
-import { handleEditorKeyDown } from "@/store/shortcuts";
+import { handleEditorKeyDown } from "@/commands/keyboard";
+import { handleCopyEvent, handleCutEvent, handlePasteEvent } from "@/commands/clipboard";
+import { openMenu } from "@/commands/uiStore";
 import { frameToParent, registerFrame } from "@/interactions/frameBridge";
 import { consumeRecentDrag } from "@/interactions/pointerSession";
 import { startDrag } from "@/interactions/dragDrop";
 import { isFreeChild, startTransform } from "@/interactions/freeform";
 import { SelectionOverlay } from "./SelectionOverlay";
+import { InlineTextEditor } from "../textEditor/InlineTextEditor";
+import { TextToolbar } from "../textEditor/TextToolbar";
 
 /** An empty HTML page for the iframe. The marker attribute tells us it has finished loading. */
 const FRAME_HTML =
@@ -24,7 +28,12 @@ const FRAME_HTML =
 function findNodeId(target: EventTarget | null): string | null {
   const el = target as Element | null;
   if (!el || typeof el.closest !== "function") return null;
-  return el.closest("[data-node-id]")?.getAttribute("data-node-id") ?? null;
+  const id = el.closest("[data-node-id]")?.getAttribute("data-node-id") ?? null;
+  // Locked layers are "click-through": climb to the first ancestor outside any locked subtree.
+  const { doc } = useEditor.getState();
+  let current = id;
+  while (current && isLockedInTree(doc, current)) current = doc.nodes[current]?.parentId ?? null;
+  return current;
 }
 
 /**
@@ -33,8 +42,12 @@ function findNodeId(target: EventTarget | null): string | null {
  *  - on a free element → select + move it
  *  - on a flow element → select + (if the pointer moves) drag to reorder
  */
+/** Is this event inside the Text currently being edited? Then the text editor owns it. */
+const inEditingText = (target: EventTarget | null) =>
+  !!(target as Element | null)?.closest?.("[data-editing]");
+
 function onCanvasPointerDown(e: PointerEvent) {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || inEditingText(e.target)) return; // let the caret/selection work normally
   const id = findNodeId(e.target);
   const state = useEditor.getState();
   const node = id ? state.doc.nodes[id] : undefined;
@@ -68,8 +81,22 @@ export function Canvas() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [frameDoc, setFrameDoc] = useState<Document | null>(null);
 
-  // Re-render the site only when the document changes. useMemo caches the result.
-  const { tree, css } = useMemo(() => renderDocument(doc, pageId, "editor"), [doc, pageId]);
+  const editingTextId = useEditor((s) => (s.editingTextId && s.doc.nodes[s.editingTextId] ? s.editingTextId : null));
+
+  // Re-render the site only when the document (or the text being edited) changes.
+  // For the Text being edited, the override swaps in a live editor in the exact same tag.
+  const { tree, css } = useMemo(
+    () =>
+      renderDocument(doc, pageId, "editor", {
+        override: ({ node, props, rootProps }) =>
+          node.id === editingTextId ? (
+            <InlineTextEditor key={node.id} node={node} props={props as ComponentProps<typeof InlineTextEditor>["props"]} rootProps={rootProps} />
+          ) : undefined,
+      }),
+    [doc, pageId, editingTextId],
+  );
+  // Only non-null when the document uses a Google font — no external request otherwise.
+  const fontsHref = useMemo(() => googleFontsHref(doc), [doc]);
 
   // 1) Wait for the iframe's empty page to load, then grab its `document`.
   useEffect(() => {
@@ -98,23 +125,41 @@ export function Canvas() {
     const onLeave = () => hover(null);
     const onClick = (e: MouseEvent) => {
       e.preventDefault(); // links/buttons on the canvas must not navigate while editing
+      if (inEditingText(e.target)) return; // clicks inside the text being edited move the caret
       if (consumeRecentDrag()) return; // this click is just the tail end of a drag
       select(findNodeId(e.target));
     };
+    // Double-click a Text to edit it in place.
+    const onDoubleClick = (e: MouseEvent) => {
+      if (inEditingText(e.target)) return;
+      const id = findNodeId(e.target);
+      if (id && useEditor.getState().doc.nodes[id]?.type === "Text") useEditor.getState().startTextEdit(id);
+    };
     const onNativeDrag = (e: DragEvent) => e.preventDefault();
-    frameDoc.addEventListener("mousemove", onMove);
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      select(findNodeId(e.target));
+      const p = frameToParent({ x: e.clientX, y: e.clientY }); // the menu lives in the main page
+      openMenu(p.x, p.y);
+    };
+    // The same handlers as the main page — keyboard focus may be inside the iframe.
+    const listeners: [string, EventListener][] = [
+      ["mousemove", onMove as EventListener],
+      ["click", onClick as EventListener],
+      ["dblclick", onDoubleClick as EventListener],
+      ["pointerdown", onCanvasPointerDown as EventListener],
+      ["dragstart", onNativeDrag as EventListener],
+      ["contextmenu", onContextMenu as EventListener],
+      ["keydown", handleEditorKeyDown as EventListener],
+      ["copy", handleCopyEvent as EventListener],
+      ["cut", handleCutEvent as EventListener],
+      ["paste", handlePasteEvent as EventListener],
+    ];
+    for (const [type, fn] of listeners) frameDoc.addEventListener(type, fn);
     frameDoc.documentElement.addEventListener("mouseleave", onLeave);
-    frameDoc.addEventListener("click", onClick);
-    frameDoc.addEventListener("pointerdown", onCanvasPointerDown);
-    frameDoc.addEventListener("dragstart", onNativeDrag);
-    frameDoc.addEventListener("keydown", handleEditorKeyDown);
     return () => {
-      frameDoc.removeEventListener("mousemove", onMove);
+      for (const [type, fn] of listeners) frameDoc.removeEventListener(type, fn);
       frameDoc.documentElement.removeEventListener("mouseleave", onLeave);
-      frameDoc.removeEventListener("click", onClick);
-      frameDoc.removeEventListener("pointerdown", onCanvasPointerDown);
-      frameDoc.removeEventListener("dragstart", onNativeDrag);
-      frameDoc.removeEventListener("keydown", handleEditorKeyDown);
     };
   }, [frameDoc]);
 
@@ -129,8 +174,10 @@ export function Canvas() {
         <iframe ref={iframeRef} srcDoc={FRAME_HTML} title="Canvas" className="block h-full w-full border-0" />
         {/* 3) Portals: render the site's CSS into the iframe <head> and the site into its <body>. */}
         {frameDoc && createPortal(<style>{BASE_CSS + EDITOR_CSS + css}</style>, frameDoc.head)}
+        {frameDoc && fontsHref && createPortal(<link rel="stylesheet" href={fontsHref} />, frameDoc.head)}
         {frameDoc && createPortal(tree, frameDoc.body)}
         {frameDoc && <SelectionOverlay frameDoc={frameDoc} />}
+        {frameDoc && editingTextId && <TextToolbar />}
       </div>
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { createStarterDocument } from "@msb/components";
 import { useEditor } from "@/store/editorStore";
+import { setShortcutsOpen } from "@/commands/uiStore";
 
 const SAVE_LABEL = { saved: "Saved locally", unsaved: "Saving…", error: "Save failed" } as const;
 
@@ -50,6 +51,9 @@ export function TopBar() {
       <span className={`text-xs ${saveStatus === "error" ? "text-red-600" : "text-neutral-400"}`}>
         {SAVE_LABEL[saveStatus]}
       </span>
+      <ToolbarButton onClick={() => setShortcutsOpen(true)} title="Keyboard shortcuts (?)">
+        ?
+      </ToolbarButton>
       <ToolbarButton onClick={resetToStarter}>Reset</ToolbarButton>
     </header>
   );

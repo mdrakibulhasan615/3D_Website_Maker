@@ -7,6 +7,7 @@ import { computeDropTarget } from "./dropTargets";
 import { getNodeRect, type Point } from "./frameBridge";
 import { startPointerSession } from "./pointerSession";
 import { horizontalScale } from "./freeform";
+import { insertTemplateAt } from "@/commands/templates";
 
 const DRAG_THRESHOLD = 4;
 
@@ -47,6 +48,12 @@ function applyDrop(source: DragSource, target: DropTarget) {
   const intoFree = isFreeLayout(state.doc.nodes[target.parentId]);
   const point = target.freePoint;
   const scale = intoFree ? horizontalScale(target.parentId) : 1;
+
+  if (source.kind === "template") {
+    // Same path as paste: the store gives it fresh ids and (in a free section) a position.
+    insertTemplateAt(source.templateId, target.parentId, target.index);
+    return;
+  }
 
   if (source.kind === "new") {
     // No point (e.g. Mobile view of a stacked section)? The store picks a default spot.

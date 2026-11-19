@@ -8,16 +8,29 @@ import type { ReactNode } from "react";
 import { BREAKPOINT_ORDER, getPage, resolveRect, type Node, type ResponsiveStyles, type SiteDocument } from "@msb/schema";
 import { getDefinition } from "../library";
 import { designWidthOf, isFreeLayout, stacksOnMobile, visualOrder } from "../layout";
-import type { RootProps } from "../registry";
+import type { ComponentDefinition, RootProps } from "../registry";
 import { StyleSheetBuilder } from "../styles/compileStyles";
 import { tokensToCss } from "../styles/baseCss";
 
 export type RenderMode = "editor" | "live";
 
+/**
+ * Lets the caller replace how ONE node renders (e.g. the editor swaps in a live text
+ * editor for the Text being edited). Return undefined to render normally. This keeps
+ * the renderer free of any editor-only dependencies.
+ */
+export type RenderOverride = (args: {
+  node: Node;
+  def: ComponentDefinition;
+  props: unknown;
+  rootProps: RootProps;
+}) => ReactNode | undefined;
+
 type RenderContext = {
   doc: SiteDocument;
   mode: RenderMode;
   sheet: StyleSheetBuilder;
+  override?: RenderOverride;
   /** sectionId → (childId → mobile stack position). Computed once per section per render. */
   stackOrder: Map<string, Map<string, number>>;
 };
@@ -27,9 +40,14 @@ export type RenderResult = {
   css: string;
 };
 
-export function renderDocument(doc: SiteDocument, pageId: string, mode: RenderMode): RenderResult {
+export function renderDocument(
+  doc: SiteDocument,
+  pageId: string,
+  mode: RenderMode,
+  options: { override?: RenderOverride } = {},
+): RenderResult {
   const sheet = new StyleSheetBuilder(doc.breakpoints);
-  const ctx: RenderContext = { doc, mode, sheet, stackOrder: new Map() };
+  const ctx: RenderContext = { doc, mode, sheet, stackOrder: new Map(), override: options.override };
   const tree = renderNode(getPage(doc, pageId).rootNodeId, ctx);
   return { tree, css: `${tokensToCss(doc.tokens)}\n${sheet.toString()}` };
 }
@@ -61,6 +79,9 @@ function renderNode(id: string, ctx: RenderContext): ReactNode {
     rootProps["data-node-type"] = node.type;
     if (def.acceptsChildren) rootProps["data-container"] = "";
   }
+
+  const overridden = ctx.override?.({ node, def, props, rootProps });
+  if (overridden !== undefined) return overridden;
 
   const children = def.acceptsChildren ? node.children.map((childId) => renderNode(childId, ctx)) : undefined;
   const Render = def.Render;

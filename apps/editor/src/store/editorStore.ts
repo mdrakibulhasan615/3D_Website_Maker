@@ -13,15 +13,28 @@ import {
   getDescendantIds,
   getPage,
   isAncestorOf,
+  isLockedInTree,
   type BreakpointId,
+  type Fragment,
   type FreeLayout,
   type Rect,
   type SiteDocument,
   type StyleValue,
 } from "@msb/schema";
-import { isFreeLayout, nextFreeRect, stacksOnMobile, type LayoutMode } from "@msb/components";
+import {
+  defaultFreeSize,
+  isFreeLayout,
+  isValidTokenName,
+  nextFreeRect,
+  replaceTokenRefs,
+  stacksOnMobile,
+  tokenRef,
+  type LayoutMode,
+  type TokenKind,
+} from "@msb/components";
 import { createNode, getDefinition } from "@msb/components";
 import { loadInitialDocument, saveDocument } from "./persistence";
+import { extractFragment, instantiateFragment } from "./fragments";
 
 enablePatches();
 
@@ -52,6 +65,8 @@ export type EditorState = {
   pageId: string;
   selectedId: string | null;
   hoveredId: string | null;
+  /** The Text node currently being edited inline (null = not editing). */
+  editingTextId: string | null;
   breakpoint: BreakpointId;
   saveStatus: SaveStatus;
   past: HistoryEntry[];
@@ -59,6 +74,13 @@ export type EditorState = {
 
   // ── Actions ──
   select: (id: string | null) => void;
+  /** Enter inline text editing for a Text node (if it isn't locked). */
+  startTextEdit: (id: string) => void;
+  /**
+   * Leave inline editing. With a patch, the edit is saved as ONE undo step
+   * (no matter how many keystrokes it took); without one, nothing changes.
+   */
+  endTextEdit: (patch?: Record<string, unknown>) => void;
   hover: (id: string | null) => void;
   setBreakpoint: (breakpoint: BreakpointId) => void;
   /** Insert relative to the current selection (click-to-insert). */
@@ -66,6 +88,16 @@ export type EditorState = {
   /** Insert at an exact spot (drag-and-drop). `layout` is set when dropping into a free section. */
   insertNodeAt: (type: string, parentId: string, index: number, layout?: FreeLayout) => string | null;
   deleteNode: (id: string) => void;
+  /** Insert a copied subtree (fresh ids). Returns the new root id. */
+  insertFragment: (fragment: Fragment, parentId: string, index: number) => string | null;
+  duplicateNode: (id: string) => void;
+  /** Put the node inside a new Container (in its place). */
+  wrapInContainer: (id: string) => void;
+  /** Replace a container with its children. */
+  unwrapNode: (id: string) => void;
+  toggleLocked: (id: string) => void;
+  /** Move one step up (-1) or down (+1) among its siblings. */
+  moveSibling: (id: string, delta: -1 | 1) => void;
   /** layout: undefined = keep as is, null = remove (leaving a free section), object = set. */
   moveNode: (id: string, newParentId: string, index: number, layout?: FreeLayout | null) => void;
   /** Write a freeform rectangle at the CURRENT breakpoint. */
@@ -80,6 +112,13 @@ export type EditorState = {
   setProportional: (id: string, on: boolean, measuredWidth?: number) => void;
   updateProps: (id: string, patch: Record<string, unknown>) => void;
   setStyle: (id: string, prop: string, value: StyleValue | undefined) => void;
+  /** Several style props at once (one undo step), e.g. switching fill mode. */
+  setStyles: (id: string, patch: Record<string, StyleValue | undefined>) => void;
+  setToken: (kind: TokenKind, name: string, value: string) => void;
+  /** Renames the token AND rewrites every reference to it. Returns false if the name is invalid/taken. */
+  renameToken: (kind: TokenKind, from: string, to: string) => boolean;
+  /** Deletes the token and replaces its references with the literal value (nothing breaks visually). */
+  deleteToken: (kind: TokenKind, name: string) => void;
   renameNode: (id: string, name: string) => void;
   toggleHidden: (id: string) => void;
   setTitle: (title: string) => void;
@@ -107,6 +146,21 @@ function resolveInsertTarget(doc: SiteDocument, pageId: string, selectedId: stri
     }
   }
   return { parentId: rootId, index: doc.nodes[rootId]!.children.length };
+}
+
+/** Run `fn` over every string style value in the document (used to rewrite token references). */
+function rewriteStyleStrings(draft: Draft<SiteDocument>, fn: (value: string) => string) {
+  for (const node of Object.values(draft.nodes)) {
+    for (const bp of BREAKPOINT_ORDER) {
+      const styles = node.styles[bp];
+      if (!styles) continue;
+      for (const [prop, value] of Object.entries(styles)) {
+        if (typeof value !== "string") continue;
+        const next = fn(value);
+        if (next !== value) styles[prop] = next;
+      }
+    }
+  }
 }
 
 export const useEditor = create<EditorState>()((set, get) => {
@@ -142,12 +196,35 @@ export const useEditor = create<EditorState>()((set, get) => {
     pageId: initialDoc.pages[0]!.id,
     selectedId: null,
     hoveredId: null,
+    editingTextId: null,
     breakpoint: "lg",
     saveStatus: "saved",
     past: [],
     future: [],
 
     select: (id) => set({ selectedId: id }),
+
+    startTextEdit: (id) => {
+      const { doc } = get();
+      if (doc.nodes[id]?.type !== "Text" || isLockedInTree(doc, id)) return;
+      set({ selectedId: id, editingTextId: id });
+    },
+
+    endTextEdit: (patch) => {
+      const id = get().editingTextId;
+      if (!id) return;
+      set({ editingTextId: null });
+      if (patch) {
+        commit((draft) => {
+          const node = draft.nodes[id];
+          if (!node) return;
+          for (const [key, value] of Object.entries(patch)) {
+            if (value === undefined) delete node.props[key];
+            else node.props[key] = value;
+          }
+        });
+      }
+    },
     hover: (id) => {
       if (get().hoveredId !== id) set({ hoveredId: id });
     },
@@ -162,6 +239,7 @@ export const useEditor = create<EditorState>()((set, get) => {
     insertNodeAt: (type, parentId, index, layout) => {
       const parent = get().doc.nodes[parentId];
       if (!getDefinition(type) || !parent || !getDefinition(parent.type)?.acceptsChildren) return null;
+      if (isLockedInTree(get().doc, parentId)) return null;
       const node = createNode(type, parentId);
       if (layout) node.layout = layout;
       // Anything inside a free section needs a position, even when inserted by click.
@@ -178,6 +256,7 @@ export const useEditor = create<EditorState>()((set, get) => {
       const { doc, pageId } = get();
       const node = doc.nodes[id];
       if (!node?.parentId || id === getPage(doc, pageId).rootNodeId) return; // can't delete the page root
+      if (isLockedInTree(doc, id)) return;
       const parentId = node.parentId;
       const toDelete = [id, ...getDescendantIds(doc, id)];
       commit((draft) => {
@@ -194,6 +273,7 @@ export const useEditor = create<EditorState>()((set, get) => {
       const newParent = doc.nodes[newParentId];
       if (!node?.parentId || !newParent) return;
       if (id === newParentId || isAncestorOf(doc, id, newParentId)) return; // can't drop into itself
+      if (isLockedInTree(doc, id) || isLockedInTree(doc, newParentId)) return;
       if (!getDefinition(newParent.type)?.acceptsChildren) return;
       const oldParentId = node.parentId;
       commit((draft) => {
@@ -212,6 +292,117 @@ export const useEditor = create<EditorState>()((set, get) => {
         }
       });
       set({ selectedId: id });
+    },
+
+    insertFragment: (fragment, parentId, index) => {
+      const { doc } = get();
+      const parent = doc.nodes[parentId];
+      if (!parent || !getDefinition(parent.type)?.acceptsChildren || isLockedInTree(doc, parentId)) return null;
+
+      const { rootId, nodes } = instantiateFragment(fragment);
+      const root = nodes[rootId]!;
+      root.parentId = parentId;
+      if (!isFreeLayout(parent)) {
+        delete root.layout; // flow parent: positions don't apply
+      } else if (root.layout) {
+        // Offset copies so they don't sit exactly on top of the original.
+        for (const bp of BREAKPOINT_ORDER) {
+          const r = root.layout[bp];
+          if (r) root.layout[bp] = { ...r, x: r.x + 16, y: r.y + 16 };
+        }
+      } else {
+        root.layout = { base: nextFreeRect(doc.nodes, parent, root.type) };
+      }
+
+      commit((draft) => {
+        Object.assign(draft.nodes, nodes);
+        draft.nodes[parentId]!.children.splice(index, 0, rootId);
+      });
+      set({ selectedId: rootId });
+      return rootId;
+    },
+
+    duplicateNode: (id) => {
+      const { doc } = get();
+      const node = doc.nodes[id];
+      if (!node?.parentId) return;
+      const parent = doc.nodes[node.parentId]!;
+      get().insertFragment(extractFragment(doc, id), parent.id, parent.children.indexOf(id) + 1);
+    },
+
+    wrapInContainer: (id) => {
+      const { doc } = get();
+      const node = doc.nodes[id];
+      if (!node?.parentId || isLockedInTree(doc, id)) return;
+      const parentId = node.parentId;
+      const wrapper = createNode("Container", parentId);
+      wrapper.name = "Group";
+      wrapper.children = [id];
+      // In a free section the WRAPPER takes over the position; the node flows inside it.
+      if (node.layout && isFreeLayout(doc.nodes[parentId])) wrapper.layout = structuredClone(node.layout);
+
+      commit((draft) => {
+        draft.nodes[wrapper.id] = wrapper;
+        const parent = draft.nodes[parentId]!;
+        parent.children[parent.children.indexOf(id)] = wrapper.id;
+        const moved = draft.nodes[id]!;
+        moved.parentId = wrapper.id;
+        delete moved.layout;
+      });
+      set({ selectedId: wrapper.id });
+    },
+
+    unwrapNode: (id) => {
+      const { doc } = get();
+      const node = doc.nodes[id];
+      if (!node?.parentId || !getDefinition(node.type)?.acceptsChildren || isLockedInTree(doc, id)) return;
+      const parentId = node.parentId;
+      const parent = doc.nodes[parentId]!;
+      const intoFree = isFreeLayout(parent);
+      // Where the children go in a free parent: stacked from the container's old position.
+      const origin = node.layout ? resolveRect(node.layout, "lg") : nextFreeRect(doc.nodes, parent, node.type);
+
+      commit((draft) => {
+        const p = draft.nodes[parentId]!;
+        p.children.splice(p.children.indexOf(id), 1, ...node.children);
+        let y = origin.y;
+        for (const childId of node.children) {
+          const child = draft.nodes[childId]!;
+          child.parentId = parentId;
+          if (!intoFree) {
+            delete child.layout;
+          } else {
+            const size = defaultFreeSize(child.type);
+            child.layout = { base: { x: origin.x, y, w: Math.min(size.w, origin.w), h: size.h } };
+            y += size.h + 16;
+          }
+        }
+        delete draft.nodes[id];
+      });
+      set({ selectedId: node.children[0] ?? parentId });
+    },
+
+    toggleLocked: (id) =>
+      commit((draft) => {
+        const node = draft.nodes[id];
+        if (!node?.parentId) return; // the page root can't be locked
+        if (node.locked) delete node.locked;
+        else node.locked = true;
+      }),
+
+    moveSibling: (id, delta) => {
+      const { doc } = get();
+      const node = doc.nodes[id];
+      if (!node?.parentId || isLockedInTree(doc, id)) return;
+      const siblings = doc.nodes[node.parentId]!.children;
+      const from = siblings.indexOf(id);
+      const to = from + delta;
+      if (to < 0 || to >= siblings.length) return;
+      commit((draft) => {
+        const children = draft.nodes[node.parentId!]!.children;
+        children.splice(from, 1);
+        children.splice(to, 0, id);
+      }, `sibling:${id}`);
     },
 
     setFreeRect: (id, rect, mergeKey) => {
@@ -296,6 +487,46 @@ export const useEditor = create<EditorState>()((set, get) => {
         if (Object.keys(styles).length === 0) delete node.styles[bp];
       }, `style:${id}:${bp}:${prop}`);
     },
+
+    setStyles: (id, patch) => {
+      const bp = get().breakpoint;
+      commit((draft) => {
+        const node = draft.nodes[id];
+        if (!node) return;
+        const styles = (node.styles[bp] ??= {});
+        for (const [prop, value] of Object.entries(patch)) {
+          if (value === undefined || value === "") delete styles[prop];
+          else styles[prop] = value;
+        }
+        if (Object.keys(styles).length === 0) delete node.styles[bp];
+      }, `styles:${id}:${bp}:${Object.keys(patch).sort().join(",")}`);
+    },
+
+    setToken: (kind, name, value) =>
+      commit((draft) => {
+        draft.tokens[kind][name] = value;
+      }, `token:${kind}:${name}`),
+
+    renameToken: (kind, from, to) => {
+      const tokens = get().doc.tokens[kind];
+      if (from === to || !(from in tokens) || to in tokens || !isValidTokenName(to)) return false;
+      commit((draft) => {
+        // Rebuild the object so the renamed token keeps its position in the list.
+        draft.tokens[kind] = Object.fromEntries(
+          Object.entries(draft.tokens[kind]).map(([k, v]) => (k === from ? [to, v] : [k, v])),
+        );
+        rewriteStyleStrings(draft, (v) => replaceTokenRefs(v, kind, from, (fallback) => tokenRef(kind, to, fallback)));
+      });
+      return true;
+    },
+
+    deleteToken: (kind, name) =>
+      commit((draft) => {
+        const value = draft.tokens[kind][name];
+        if (value === undefined) return;
+        delete draft.tokens[kind][name];
+        rewriteStyleStrings(draft, (v) => replaceTokenRefs(v, kind, name, value));
+      }),
 
     renameNode: (id, name) =>
       commit((draft) => {

@@ -6,7 +6,8 @@ import { create } from "zustand";
 import type { Box, Point } from "./frameBridge";
 
 export type DragSource =
-  | { kind: "new"; type: string; label: string } // from the Insert panel
+  | { kind: "new"; type: string; label: string } // one element from the Insert panel
+  | { kind: "template"; templateId: string; label: string } // a whole section from the library
   | { kind: "move"; id: string; label: string }; // an existing node
 
 export type DropTarget = {
