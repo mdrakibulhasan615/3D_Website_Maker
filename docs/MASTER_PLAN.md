@@ -414,7 +414,10 @@ File tree → zip / GitHub repo / Vercel deploy hook
 - Decision: per-breakpoint **styles stay mobile-first** (no pinning) — matches the Tailwind code we will export; positions pin because they are coordinates, not cascading intent.
 - [x] Layer Tree: collapse/expand (auto-reveals selection), double-click rename, lock, hide, drag to reparent, right-click menu
 - [ ] Layer Tree virtualization (only needed for very large pages)
-- [ ] Section library: Hero, Feature Grid, Bento Grid (grid snap), Pricing, Testimonials
+- [x] Section library (`packages/components/src/templates/`): Hero centered, Hero split, Feature grid, Bento grid, Pricing, Testimonials, Call to action — templates are DATA built from primitives (fully editable), inserted via the same fragment path as paste; token colors with fallbacks; responsive grids (bento spans tablet+ only)
+- [x] Grid-aware drop targets (reading order + vertical insertion line)
+- [ ] Explicit grid-cell placement (drop onto a specific row/column, drag to change spans)
+- [ ] User-saved templates ("save selection as section")
 - [x] Command registry (`apps/editor/src/commands/`) drives keyboard, context menu and the `?` shortcuts dialog
 - [x] Copy/cut/paste via native clipboard events (works across tabs; pasted data validated with Zod + structure checks; plain text → Text element), duplicate, wrap in container / unwrap, lock (click-through, no move/delete/drop), move up/down, arrow-key nudge, Escape → parent
 - [ ] Multi-select (Shift-click) + true "Group selection" — deferred: touches selection, overlay, inspector and drag

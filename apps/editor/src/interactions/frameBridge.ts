@@ -46,11 +46,15 @@ export function parentToFrame(p: Point): Point | null {
   return { x: p.x - r.left, y: p.y - r.top };
 }
 
-/** Does this container stack its children horizontally or vertically? (Read from real CSS.) */
-export function getFlowDirection(id: string): "row" | "column" {
+/**
+ * How does this container lay out its children? Read from the REAL computed CSS:
+ * "row" (flex row), "column" (flex column / block), or "grid" (CSS grid — 2D, reading order).
+ */
+export function getFlowDirection(id: string): "row" | "column" | "grid" {
   const el = getNodeElement(id);
   const view = el?.ownerDocument.defaultView;
   if (!el || !view) return "column";
   const css = view.getComputedStyle(el);
+  if (css.display.includes("grid")) return "grid";
   return css.display.includes("flex") && css.flexDirection.startsWith("row") ? "row" : "column";
 }
