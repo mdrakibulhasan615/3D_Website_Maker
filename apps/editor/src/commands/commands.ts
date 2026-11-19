@@ -82,6 +82,15 @@ export const COMMANDS: Command[] = [
     run: (s) => s.deleteNode(s.selectedId!),
   },
 
+  {
+    id: "edit-text",
+    label: "Edit text",
+    group: "Edit",
+    keys: [{ key: "Enter" }],
+    enabled: (s) => editable(s) && selected(s)?.type === "Text" && s.editingTextId === null,
+    run: (s) => s.startTextEdit(s.selectedId!),
+  },
+
   // Arrange
   { id: "wrap", label: "Wrap in container", group: "Arrange", keys: [{ key: "g", mod: true }], enabled: editable, run: (s) => s.wrapInContainer(s.selectedId!) },
   {

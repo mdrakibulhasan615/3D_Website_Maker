@@ -7,9 +7,9 @@ import { COMMAND_BY_ID, labelOf, shortcutOf } from "@/commands/commands";
 import { closeMenu, useUiStore } from "@/commands/uiStore";
 
 /** "-" = separator. */
-const ITEMS = ["copy", "cut", "paste", "duplicate", "-", "wrap", "unwrap", "-", "move-up", "move-down", "-", "lock", "hide", "-", "delete"];
+const ITEMS = ["edit-text", "-", "copy", "cut", "paste", "duplicate", "-", "wrap", "unwrap", "-", "move-up", "move-down", "-", "lock", "hide", "-", "delete"];
 const WIDTH = 220;
-const HEIGHT = 380; // approximate, for keeping the menu on screen
+const HEIGHT = 420; // approximate, for keeping the menu on screen
 
 export function ContextMenu() {
   const menu = useUiStore((s) => s.menu);

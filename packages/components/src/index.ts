@@ -4,6 +4,7 @@ export * from "./layout";
 export * from "./tokens";
 export * from "./fonts";
 export * from "./templates";
+export * from "./richText";
 export * from "./factory";
 export * from "./starter";
 export * from "./render/renderDocument";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { createPortal } from "react-dom";
 import { isAncestorOf, isLockedInTree } from "@msb/schema";
 import { BASE_CSS, EDITOR_CSS, getDefinition, googleFontsHref, renderDocument } from "@msb/components";
@@ -13,6 +13,8 @@ import { consumeRecentDrag } from "@/interactions/pointerSession";
 import { startDrag } from "@/interactions/dragDrop";
 import { isFreeChild, startTransform } from "@/interactions/freeform";
 import { SelectionOverlay } from "./SelectionOverlay";
+import { InlineTextEditor } from "../textEditor/InlineTextEditor";
+import { TextToolbar } from "../textEditor/TextToolbar";
 
 /** An empty HTML page for the iframe. The marker attribute tells us it has finished loading. */
 const FRAME_HTML =
@@ -40,8 +42,12 @@ function findNodeId(target: EventTarget | null): string | null {
  *  - on a free element → select + move it
  *  - on a flow element → select + (if the pointer moves) drag to reorder
  */
+/** Is this event inside the Text currently being edited? Then the text editor owns it. */
+const inEditingText = (target: EventTarget | null) =>
+  !!(target as Element | null)?.closest?.("[data-editing]");
+
 function onCanvasPointerDown(e: PointerEvent) {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || inEditingText(e.target)) return; // let the caret/selection work normally
   const id = findNodeId(e.target);
   const state = useEditor.getState();
   const node = id ? state.doc.nodes[id] : undefined;
@@ -75,8 +81,20 @@ export function Canvas() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [frameDoc, setFrameDoc] = useState<Document | null>(null);
 
-  // Re-render the site only when the document changes. useMemo caches the result.
-  const { tree, css } = useMemo(() => renderDocument(doc, pageId, "editor"), [doc, pageId]);
+  const editingTextId = useEditor((s) => (s.editingTextId && s.doc.nodes[s.editingTextId] ? s.editingTextId : null));
+
+  // Re-render the site only when the document (or the text being edited) changes.
+  // For the Text being edited, the override swaps in a live editor in the exact same tag.
+  const { tree, css } = useMemo(
+    () =>
+      renderDocument(doc, pageId, "editor", {
+        override: ({ node, props, rootProps }) =>
+          node.id === editingTextId ? (
+            <InlineTextEditor key={node.id} node={node} props={props as ComponentProps<typeof InlineTextEditor>["props"]} rootProps={rootProps} />
+          ) : undefined,
+      }),
+    [doc, pageId, editingTextId],
+  );
   // Only non-null when the document uses a Google font — no external request otherwise.
   const fontsHref = useMemo(() => googleFontsHref(doc), [doc]);
 
@@ -107,8 +125,15 @@ export function Canvas() {
     const onLeave = () => hover(null);
     const onClick = (e: MouseEvent) => {
       e.preventDefault(); // links/buttons on the canvas must not navigate while editing
+      if (inEditingText(e.target)) return; // clicks inside the text being edited move the caret
       if (consumeRecentDrag()) return; // this click is just the tail end of a drag
       select(findNodeId(e.target));
+    };
+    // Double-click a Text to edit it in place.
+    const onDoubleClick = (e: MouseEvent) => {
+      if (inEditingText(e.target)) return;
+      const id = findNodeId(e.target);
+      if (id && useEditor.getState().doc.nodes[id]?.type === "Text") useEditor.getState().startTextEdit(id);
     };
     const onNativeDrag = (e: DragEvent) => e.preventDefault();
     const onContextMenu = (e: MouseEvent) => {
@@ -121,6 +146,7 @@ export function Canvas() {
     const listeners: [string, EventListener][] = [
       ["mousemove", onMove as EventListener],
       ["click", onClick as EventListener],
+      ["dblclick", onDoubleClick as EventListener],
       ["pointerdown", onCanvasPointerDown as EventListener],
       ["dragstart", onNativeDrag as EventListener],
       ["contextmenu", onContextMenu as EventListener],
@@ -151,6 +177,7 @@ export function Canvas() {
         {frameDoc && fontsHref && createPortal(<link rel="stylesheet" href={fontsHref} />, frameDoc.head)}
         {frameDoc && createPortal(tree, frameDoc.body)}
         {frameDoc && <SelectionOverlay frameDoc={frameDoc} />}
+        {frameDoc && editingTextId && <TextToolbar />}
       </div>
     </div>
   );

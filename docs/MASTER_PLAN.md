@@ -421,7 +421,8 @@ File tree → zip / GitHub repo / Vercel deploy hook
 - [x] Command registry (`apps/editor/src/commands/`) drives keyboard, context menu and the `?` shortcuts dialog
 - [x] Copy/cut/paste via native clipboard events (works across tabs; pasted data validated with Zod + structure checks; plain text → Text element), duplicate, wrap in container / unwrap, lock (click-through, no move/delete/drop), move up/down, arrow-key nudge, Escape → parent
 - [ ] Multi-select (Shift-click) + true "Group selection" — deferred: touches selection, overlay, inspector and drag
-- [ ] Rich text editing (Tiptap) inside Text nodes
+- [x] Rich text editing inside Text nodes: double-click / Enter / menu to edit in place (Tiptap, mounted INSIDE the canvas iframe; editor-only — never shipped to published sites). Stored as validated "spans" (bold, italic, underline, strike, code, link, line break), rendered as React elements — never as injected HTML. Links limited to http(s)/mailto/tel/#/same-site paths, enforced in both the editor and the renderer. A whole edit = one undo step.
+- [ ] Merge adjacent spans that share the same link (cosmetic: avoids two `<a>`s side by side)
 
 **Exit criteria:** a non-developer can build a polished marketing page from templates in under 15 minutes.
 

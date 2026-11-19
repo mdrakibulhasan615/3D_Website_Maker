@@ -65,6 +65,8 @@ export type EditorState = {
   pageId: string;
   selectedId: string | null;
   hoveredId: string | null;
+  /** The Text node currently being edited inline (null = not editing). */
+  editingTextId: string | null;
   breakpoint: BreakpointId;
   saveStatus: SaveStatus;
   past: HistoryEntry[];
@@ -72,6 +74,13 @@ export type EditorState = {
 
   // ── Actions ──
   select: (id: string | null) => void;
+  /** Enter inline text editing for a Text node (if it isn't locked). */
+  startTextEdit: (id: string) => void;
+  /**
+   * Leave inline editing. With a patch, the edit is saved as ONE undo step
+   * (no matter how many keystrokes it took); without one, nothing changes.
+   */
+  endTextEdit: (patch?: Record<string, unknown>) => void;
   hover: (id: string | null) => void;
   setBreakpoint: (breakpoint: BreakpointId) => void;
   /** Insert relative to the current selection (click-to-insert). */
@@ -187,12 +196,35 @@ export const useEditor = create<EditorState>()((set, get) => {
     pageId: initialDoc.pages[0]!.id,
     selectedId: null,
     hoveredId: null,
+    editingTextId: null,
     breakpoint: "lg",
     saveStatus: "saved",
     past: [],
     future: [],
 
     select: (id) => set({ selectedId: id }),
+
+    startTextEdit: (id) => {
+      const { doc } = get();
+      if (doc.nodes[id]?.type !== "Text" || isLockedInTree(doc, id)) return;
+      set({ selectedId: id, editingTextId: id });
+    },
+
+    endTextEdit: (patch) => {
+      const id = get().editingTextId;
+      if (!id) return;
+      set({ editingTextId: null });
+      if (patch) {
+        commit((draft) => {
+          const node = draft.nodes[id];
+          if (!node) return;
+          for (const [key, value] of Object.entries(patch)) {
+            if (value === undefined) delete node.props[key];
+            else node.props[key] = value;
+          }
+        });
+      }
+    },
     hover: (id) => {
       if (get().hoveredId !== id) set({ hoveredId: id });
     },

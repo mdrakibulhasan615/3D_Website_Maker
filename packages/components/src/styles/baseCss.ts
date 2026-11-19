@@ -18,6 +18,10 @@ img{-webkit-user-drag:none}
 [data-node-id]{cursor:default}
 a[data-node-id],[data-node-id] a{cursor:default}
 [data-container]:empty{min-height:64px;outline:1px dashed #a5b4fc;outline-offset:-4px;background:rgba(99,102,241,.04)}
+[data-node-type="Text"]:empty::before{content:"Empty text";opacity:.35}
+.ProseMirror{outline:none;white-space:pre-wrap;word-wrap:break-word;cursor:text}
+.ProseMirror p{margin:0}
+[data-editing]{outline:2px solid #6366f1;outline-offset:4px;border-radius:2px}
 [data-container]:empty::after{content:"Empty — select it and insert an element";display:block;padding:22px 12px;font:12px system-ui;color:#818cf8;text-align:center}
 `;
 

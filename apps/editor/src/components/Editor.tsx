@@ -32,7 +32,9 @@ export default function Editor() {
   }, []);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-neutral-100 text-sm text-neutral-900">
+    // select-none: the editor chrome isn't document text (Ctrl+A shouldn't highlight panels).
+    // Inputs and textareas still allow selecting their own text.
+    <div className="flex h-screen select-none flex-col overflow-hidden bg-neutral-100 text-sm text-neutral-900">
       <TopBar />
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-60 shrink-0 flex-col border-r border-neutral-200 bg-white">

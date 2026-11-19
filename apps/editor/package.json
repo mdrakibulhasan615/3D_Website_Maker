@@ -11,6 +11,10 @@
   "dependencies": {
     "@msb/components": "*",
     "@msb/schema": "*",
+    "@tiptap/extension-document": "^3.34.0",
+    "@tiptap/pm": "^3.34.0",
+    "@tiptap/react": "^3.34.0",
+    "@tiptap/starter-kit": "^3.34.0",
     "immer": "^11.2.10",
     "next": "^15.5.29",
     "react": "^19.3.1",

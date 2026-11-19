@@ -43,6 +43,7 @@ export function SelectionOverlay({ frameDoc }: { frameDoc: Document }) {
     const node = s.selectedId ? s.doc.nodes[s.selectedId] : undefined;
     return (
       !!node?.layout &&
+      s.editingTextId !== node.id && // no resize handles while typing in it
       !isLockedInTree(s.doc, node.id) &&
       isPositionedAt(node.parentId ? s.doc.nodes[node.parentId] : undefined, s.breakpoint)
     );

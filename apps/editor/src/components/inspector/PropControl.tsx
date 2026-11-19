@@ -3,7 +3,7 @@
 /** Content props (text, links, layout mode…) — generated from each component's `inspector` config. */
 import type { ReactNode } from "react";
 import type { Node } from "@msb/schema";
-import type { InspectorControl, LayoutMode } from "@msb/components";
+import { hasFormatting, type InspectorControl, type LayoutMode, type RichSpan } from "@msb/components";
 import { useEditor } from "@/store/editorStore";
 import { setProportional, switchLayoutMode } from "@/interactions/freeform";
 import { INPUT, Row } from "./ui";
@@ -35,7 +35,34 @@ export function PropControl({ node, control, value: raw }: { node: Node; control
       />
     );
   } else if (control.control === "textarea") {
-    input = <textarea value={value} rows={3} onChange={(e) => update(e.target.value)} className={INPUT} />;
+    // Formatted Text: a plain textarea would silently drop the bold/links, so make it
+    // read-only and offer an explicit "Clear formatting" instead.
+    const formatted = node.type === "Text" && control.prop === "text" && hasFormatting(node.props.rich as RichSpan[] | undefined);
+    input = (
+      <div className="flex flex-col gap-1">
+        <textarea
+          value={value}
+          rows={3}
+          readOnly={formatted}
+          onChange={(e) => update(e.target.value)}
+          className={`${INPUT} ${formatted ? "bg-neutral-50 text-neutral-500" : ""}`}
+        />
+        {node.type === "Text" && control.prop === "text" && (
+          <span className="text-[10px] leading-snug text-neutral-400">
+            {formatted ? "Has formatting — double-click the text on the canvas to edit. " : "Double-click on the canvas for bold, links and more."}
+            {formatted && (
+              <button
+                type="button"
+                onClick={() => useEditor.getState().updateProps(node.id, { rich: undefined })}
+                className="font-medium text-indigo-600 hover:text-indigo-800"
+              >
+                Clear formatting
+              </button>
+            )}
+          </span>
+        )}
+      </div>
+    );
   } else if (control.control === "select") {
     input = (
       <select value={value} onChange={(e) => update(e.target.value)} className={INPUT}>
